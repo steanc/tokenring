@@ -37,14 +37,14 @@ void MacReceiver(void *argument)
 		
 		
 		//read message
-		if (qPtr[1] == TOKEN_TAG)    						// is it a token frame ?
+		if (qPtr[0] == TOKEN_TAG)    						// is it a token frame ?
 		{
-		  size = TOKENSIZE;											// yes -> token frame size
+		  //size = TOKENSIZE;											// yes -> token frame size
 			
 			//todo after token OK, move after the "end if"
-			msg = osMemoryPoolAlloc(memPool,osWaitForever);
-			memcpy(msg,&qPtr[1],size-2);
-			queueMsg.anyPtr = msg;
+			//msg = osMemoryPoolAlloc(memPool,osWaitForever);
+			//memcpy(msg,qPtr,size);
+			queueMsg.anyPtr = qPtr;
 			queueMsg.type = TOKEN;
 			retCode = osMessageQueuePut(
 				queue_macS_id,

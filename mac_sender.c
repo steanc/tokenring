@@ -43,6 +43,10 @@ void MacSender(void *argument)
 	* #To PHY_SENDER
 	* TO_PHY : SRC|DST|...CS (DATA frame pointer)
 	*/
+	
+	//init time on
+	gTokenInterface.station_list[MYADDRESS] = ((1 << TIME_SAPI) + (1 << CHAT_SAPI));
+	
 	for(;;){	//Loop until doomsday
 		retCode = osMessageQueueGet(
 			queue_macS_id,
@@ -56,7 +60,13 @@ void MacSender(void *argument)
 			case TOKEN :
 				//TODO first
 				for(int i = 0; i < 15; i++){
-					gTokenInterface.station_list[i] = qPtr[i+2];	//Update Ready list
+					if(i == MYADDRESS) {
+						qPtr[i+1] = gTokenInterface.station_list[i];
+					}
+					else {
+						gTokenInterface.station_list[i] = qPtr[i+1];	//Update Ready list
+					}
+					
 				}
 				queueMsg2.type = TOKEN_LIST;
 				queueMsg2.anyPtr = NULL;
@@ -65,14 +75,17 @@ void MacSender(void *argument)
 					&queueMsg2,
 					osPriorityNormal,
 					osWaitForever);
-				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);					
+				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
+/*				
 				if(!gTokenInterface.station_list[MYADDRESS]){
-					qPtr[MYADDRESS+2] = (1 << TIME_SAPI);
+					//qPtr[MYADDRESS+1] = ((1 << TIME_SAPI) + (1 << CHAT_SAPI));
+					qPtr[MYADDRESS] = ((1 << TIME_SAPI) + (1 << CHAT_SAPI));
 				}
-				msg = osMemoryPoolAlloc(memPool,osWaitForever);	
-				size = TOKENSIZE;
-				memcpy(msg,&qPtr[1],size-2);
-				queueMsg.anyPtr = msg;
+				*/
+				//msg = osMemoryPoolAlloc(memPool,osWaitForever);	
+				//size = TOKENSIZE;
+				//memcpy(msg,qPtr,size-2);
+				queueMsg.anyPtr = qPtr;
 				queueMsg.type = TO_PHY;
 				retCode = osMessageQueuePut(
 					queue_phyS_id,
@@ -101,8 +114,10 @@ void MacSender(void *argument)
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);			
 				break;
 			case START :
+				gTokenInterface.station_list[MYADDRESS] = ((1 << TIME_SAPI) + (1 << CHAT_SAPI));
 				break;
 			case STOP :
+				gTokenInterface.station_list[MYADDRESS] = (1 << TIME_SAPI);
 				break;
 			case DATA_IND : //From Chat_Sender or Time_Sender ?
 				break;
