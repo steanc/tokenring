@@ -16,89 +16,86 @@
 //////////////////////////////////////////////////////////////////////////////////
 void MacReceiver(void *argument)
 {
-	struct queueMsg_t queueMsg;
-	struct queueMsg_t appMsg;
-	uint8_t * msg;
-	uint8_t * qPtr;
+	//struct queueMsg_t queueMsg;
+	
+	struct queueMsg_t * qMsgIn;
+	struct queueMsg_t * qMsgOut;
+	uint8_t * qPtrIn;	
+	struct queueMsg_t * qMsgToApp;
+	char * stringPtr;
+	
+	
 	osStatus_t retCode;
 	size_t	size;
 	
-	char * stringPtr;
-	
 	for(;;) {
 		//wait for data, check queue
-		retCode = osMessageQueueGet(queue_macR_id, &queueMsg, NULL, osWaitForever);
+		retCode = osMessageQueueGet(queue_macR_id, qMsgIn, NULL, osWaitForever);
 		CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
-		qPtr = queueMsg.anyPtr;
+		qPtrIn = qMsgIn->anyPtr;
 		
 		
 		//read message
-		if (qPtr[0] == TOKEN_TAG)    						//is it a token frame
+		if (qPtrIn[0] == TOKEN_TAG) //is it a token frame ?
 		{
-			queueMsg.anyPtr = qPtr;
-			queueMsg.type = TOKEN;
+			//send away
+			qMsgOut->anyPtr = qPtrIn;
+			qMsgOut->type = TOKEN;
 			retCode = osMessageQueuePut(
 				queue_macS_id,
-				&queueMsg,
+				qMsgOut,
 				osPriorityNormal,
 				osWaitForever);
 			CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	
 		}
 		
-		/*
-		((msg[1]>>3) == gTokenInterface.myAddress) ||	// is destination my address
-			((msg[0]>>3) == gTokenInterface.myAddress) ||	// is source my address
-			((msg[1]>>3) == BROADCAST_ADDRESS))	// is a broadcast frame
-		*/
-		
-		else
+		else //not a token
 		{
-			if(((qPtr[1]>>3) == gTokenInterface.myAddress) || 	//is destination my address
-				((qPtr[1]>>3) == BROADCAST_ADDRESS))							//is a broadcast frame
+			if(((qPtrIn[1]>>3) == gTokenInterface.myAddress) || 	//is destination my address ?
+				((qPtrIn[1]>>3) == BROADCAST_ADDRESS))							//is it a broadcast frame ?
 			{
+				size = qPtrIn[2]+4;
 				//compute checksum
 				//le checksum se fait sur les 6 bits de poids faible de la somme des bytes (SRC, DST, LEN, data bytes)				
-				uint32_t check = qPtr[0]+qPtr[1]+qPtr[2];
-				for(int i=0;i<qPtr[2];i++) {
-					check += qPtr[3+i];
+				uint32_t check = qPtrIn[0]+qPtrIn[1]+qPtrIn[2];
+				for(int i=0;i<size-4;i++) {
+					check += qPtrIn[3+i];
 				}
 				
-				size = qPtr[2]+4;
-				
-				if((check&0x3F) == (qPtr[size]>>2)) //checksum ok
+				if((check&0x3F) == (qPtrIn[size]>>2)) //checksum ok
 				{
-					qPtr[size] = qPtr[size] | 0x3;
+					qPtrIn[size] = qPtrIn[size] | 0x3; //update READ / ACK
 					
 					
 					//data_ind
-					switch(qPtr[1]&0x3) {
+					switch(qPtrIn[1]&0x7) {
 						case TIME_SAPI:
-							stringPtr = osMemoryPoolAlloc(memPool,osWaitForever);
-							memcpy(msg,&qPtr[3],size-4);
+							qMsgToApp = osMemoryPoolAlloc(memPool,osWaitForever);
+							memcpy(stringPtr,&qPtrIn[3],size-4);
 						
-							appMsg.type = DATA_IND;			
-							appMsg.anyPtr = stringPtr;
-							appMsg.sapi = qPtr[0]&0x7;	
-							appMsg.addr = qPtr[0]>>3;
+							qMsgToApp->type = DATA_IND;			
+							qMsgToApp->anyPtr = stringPtr;
+							qMsgToApp->sapi = qPtrIn[0]&0x7;	
+							qMsgToApp->addr = qPtrIn[0]>>3;
 							retCode = osMessageQueuePut(
 								queue_timeR_id,
-								&appMsg,
+								qMsgToApp,
 								osPriorityNormal,
 								osWaitForever);
 							CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);				
 							break;
 						
 						case CHAT_SAPI:
-							stringPtr = osMemoryPoolAlloc(memPool,osWaitForever);
-							memcpy(msg,&qPtr[3],size-4);
+							qMsgToApp = osMemoryPoolAlloc(memPool,osWaitForever);
+							memcpy(stringPtr,&qPtrIn[3],size-4);
 						
-							appMsg.type = DATA_IND;			
-							appMsg.anyPtr = stringPtr;
-							appMsg.sapi = qPtr[0]&0x7;	
-							appMsg.addr = qPtr[0]>>3;
+							qMsgToApp->type = DATA_IND;			
+							qMsgToApp->anyPtr = stringPtr;
+							qMsgToApp->sapi = qPtrIn[0]&0x7;	
+							qMsgToApp->addr = qPtrIn[0]>>3;
 							retCode = osMessageQueuePut(
 								queue_chatR_id,
-								&appMsg,
+								qMsgToApp,
 								osPriorityNormal,
 								osWaitForever);
 							CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
@@ -110,7 +107,9 @@ void MacReceiver(void *argument)
 				}
 				else //checksum error
 				{
-					qPtr[4+qPtr[3]] = qPtr[4+qPtr[3]] | 0x2;
+					qPtrIn[4+qPtrIn[3]] = qPtrIn[4+qPtrIn[3]] | 0x2; //update READ / ACK
+					
+					//do nothing else
 				}
 				
 				
@@ -118,31 +117,32 @@ void MacReceiver(void *argument)
 			}
 			
 			
-			if((qPtr[0]>>3) == gTokenInterface.myAddress) //is source my address
+			if((qPtrIn[0]>>3) == gTokenInterface.myAddress) //is source my address
 			{
-				queueMsg.anyPtr = qPtr;
-				queueMsg.type = DATABACK;
-				queueMsg.sapi = qPtr[0]&0x7;	
-				queueMsg.addr = qPtr[0]>>3;
+				qMsgOut->anyPtr = qPtrIn;
+				qMsgOut->type = DATABACK;
+				qMsgOut->sapi = qPtrIn[0]&0x7;	
+				qMsgOut->addr = qPtrIn[0]>>3;
 				retCode = osMessageQueuePut(
 					queue_macS_id,
-					&queueMsg,
+					qMsgOut,
 					osPriorityNormal,
 					osWaitForever);
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	
 			}
 			else
 			{
-				queueMsg.anyPtr = qPtr;
-				queueMsg.type = TO_PHY;
+				qMsgOut->anyPtr = qPtrIn;
+				qMsgOut->type = TO_PHY;
 				retCode = osMessageQueuePut(
 					queue_macS_id,
-					&queueMsg,
+					qMsgOut,
 					osPriorityNormal,
 					osWaitForever);
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	
 			}		
-	}	
+		}
+	}
 }
 
 
