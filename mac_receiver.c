@@ -18,10 +18,13 @@ void MacReceiver(void *argument)
 {
 	//struct queueMsg_t queueMsg;
 	
-	struct queueMsg_t * qMsgIn;
-	struct queueMsg_t * qMsgOut;
-	uint8_t * qPtrIn;	
-	struct queueMsg_t * qMsgToApp;
+	struct queueMsg_t qMsgIn;
+	struct queueMsg_t qMsgOut;
+	uint8_t * qPtrIn;
+	
+	
+	struct queueMsg_t qMsgToApp;	
+	
 	char * stringPtr;
 	
 	
@@ -30,20 +33,20 @@ void MacReceiver(void *argument)
 	
 	for(;;) {
 		//wait for data, check queue
-		retCode = osMessageQueueGet(queue_macR_id, qMsgIn, NULL, osWaitForever);
+		retCode = osMessageQueueGet(queue_macR_id, &qMsgIn, NULL, osWaitForever);
 		CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
-		qPtrIn = qMsgIn->anyPtr;
+		qPtrIn = qMsgIn.anyPtr;
 		
 		
 		//read message
 		if (qPtrIn[0] == TOKEN_TAG) //is it a token frame ?
 		{
 			//send away
-			qMsgOut->anyPtr = qPtrIn;
-			qMsgOut->type = TOKEN;
+			qMsgOut.anyPtr = qPtrIn;
+			qMsgOut.type = TOKEN;
 			retCode = osMessageQueuePut(
 				queue_macS_id,
-				qMsgOut,
+				&qMsgOut,
 				osPriorityNormal,
 				osWaitForever);
 			CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	
@@ -62,40 +65,40 @@ void MacReceiver(void *argument)
 					check += qPtrIn[3+i];
 				}
 				
-				if((check&0x3F) == (qPtrIn[size]>>2)) //checksum ok
+				if((check&0x3F) == (qPtrIn[size-1]>>2)) //checksum ok
 				{
-					qPtrIn[size] = qPtrIn[size] | 0x3; //update READ / ACK
+					qPtrIn[size-1] |= 0x3; //update READ / ACK
 					
 					
 					//data_ind
 					switch(qPtrIn[1]&0x7) {
 						case TIME_SAPI:
-							qMsgToApp = osMemoryPoolAlloc(memPool,osWaitForever);
+							stringPtr = osMemoryPoolAlloc(memPool,osWaitForever);
 							memcpy(stringPtr,&qPtrIn[3],size-4);
-						
-							qMsgToApp->type = DATA_IND;			
-							qMsgToApp->anyPtr = stringPtr;
-							qMsgToApp->sapi = qPtrIn[0]&0x7;	
-							qMsgToApp->addr = qPtrIn[0]>>3;
+							stringPtr[qPtrIn[2]] = '\0';
+							qMsgToApp.type = DATA_IND;			
+							qMsgToApp.anyPtr = stringPtr;
+							qMsgToApp.sapi = qPtrIn[0]&0x7;	
+							qMsgToApp.addr = qPtrIn[0]>>3;
 							retCode = osMessageQueuePut(
 								queue_timeR_id,
-								qMsgToApp,
+								&qMsgToApp,
 								osPriorityNormal,
 								osWaitForever);
 							CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);				
 							break;
 						
 						case CHAT_SAPI:
-							qMsgToApp = osMemoryPoolAlloc(memPool,osWaitForever);
+							stringPtr = osMemoryPoolAlloc(memPool,osWaitForever);
 							memcpy(stringPtr,&qPtrIn[3],size-4);
-						
-							qMsgToApp->type = DATA_IND;			
-							qMsgToApp->anyPtr = stringPtr;
-							qMsgToApp->sapi = qPtrIn[0]&0x7;	
-							qMsgToApp->addr = qPtrIn[0]>>3;
+							stringPtr[qPtrIn[2]] = '\0';
+							qMsgToApp.type = DATA_IND;			
+							qMsgToApp.anyPtr = stringPtr;
+							qMsgToApp.sapi = qPtrIn[0]&0x7;	
+							qMsgToApp.addr = qPtrIn[0]>>3;
 							retCode = osMessageQueuePut(
 								queue_chatR_id,
-								qMsgToApp,
+								&qMsgToApp,
 								osPriorityNormal,
 								osWaitForever);
 							CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
@@ -107,7 +110,7 @@ void MacReceiver(void *argument)
 				}
 				else //checksum error
 				{
-					qPtrIn[4+qPtrIn[3]] = qPtrIn[4+qPtrIn[3]] | 0x2; //update READ / ACK
+					qPtrIn[3+qPtrIn[3]] |=  0x2; //update READ and not ACK
 					
 					//do nothing else
 				}
@@ -119,24 +122,24 @@ void MacReceiver(void *argument)
 			
 			if((qPtrIn[0]>>3) == gTokenInterface.myAddress) //is source my address
 			{
-				qMsgOut->anyPtr = qPtrIn;
-				qMsgOut->type = DATABACK;
-				qMsgOut->sapi = qPtrIn[0]&0x7;	
-				qMsgOut->addr = qPtrIn[0]>>3;
+				qMsgOut.anyPtr = qPtrIn;
+				qMsgOut.type = DATABACK;
+				qMsgOut.sapi = qPtrIn[0]&0x7;	
+				qMsgOut.addr = qPtrIn[0]>>3;
 				retCode = osMessageQueuePut(
 					queue_macS_id,
-					qMsgOut,
+					&qMsgOut,
 					osPriorityNormal,
 					osWaitForever);
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	
 			}
 			else
 			{
-				qMsgOut->anyPtr = qPtrIn;
-				qMsgOut->type = TO_PHY;
+				qMsgOut.anyPtr = qPtrIn;
+				qMsgOut.type = TO_PHY;
 				retCode = osMessageQueuePut(
 					queue_macS_id,
-					qMsgOut,
+					&qMsgOut,
 					osPriorityNormal,
 					osWaitForever);
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	

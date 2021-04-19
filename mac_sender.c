@@ -19,10 +19,13 @@
 //////////////////////////////////////////////////////////////////////////////////
 void MacSender(void *argument)
 {
-	struct queueMsg_t* saveToken;
-	struct queueMsg_t* saveMsg;
+	uint8_t * saveToken;
+	uint8_t * saveMsg;
+	
+	
 	struct queueMsg_t queueMsg;
 	struct queueMsg_t queueMsgLCD;
+	
 	osStatus_t retCode;
 	uint8_t* qPtr;
 	uint8_t* msg;
@@ -30,27 +33,7 @@ void MacSender(void *argument)
 	osMessageQueueId_t msgBuffer;
 	msgBuffer = osMessageQueueNew(MESSAGE_BUFFER_SIZE, sizeof(struct queueMsg_t), NULL);
 	
-	/*
-	* #From MAC_Receiver
-	* TOKEN : 0xFF... (TOKEN
-	* DATAPACK : SRC|DST|...CS (DATA Frame pointer, Src add, Src SAPI)
-	* #From Touch
-	* NEW_TOKEN : ... 
-	* START : ...
-	* STOP : ...
-	* #From CHAT_SENDER
-	* DATA_IND : ...\0 (STRING frame pointer, Dest add, Src SAPI)
-	* #From TIME_SENDER
-	* DATA_IND : ...\0 (STRING frame pointer, Broadcast (0x0F), Src API)
-	* 
-	* #To LCD
-	* TOKEN_LIST : ...
-	* MAC_ERROR : ...\0 (STRING frame pointer, Src add)
-	* #To PHY_SENDER
-	* TO_PHY : SRC|DST|...CS (DATA frame pointer)
-	*/
-	
-	//init time on
+	//init sapi
 	gTokenInterface.station_list[MYADDRESS] = ((1 << TIME_SAPI) + (1 << CHAT_SAPI));
 	
 	for(;;){	//Loop until doomsday
@@ -64,7 +47,6 @@ void MacSender(void *argument)
 		
 		switch(queueMsg.type){
 			case TOKEN :
-				//TODO first
 				for(int i = 0; i < 15; i++){
 					if(i == MYADDRESS) {
 						qPtr[i+1] = gTokenInterface.station_list[i];
@@ -77,7 +59,7 @@ void MacSender(void *argument)
 				queueMsg.type = TO_PHY;	//Update token destination
 				queueMsg.anyPtr = qPtr;	//Update token data
 				
-				queueMsgLCD.type = TOKEN_LIST;	//Pour le LCD
+				queueMsgLCD.type = TOKEN_LIST;	//For the LCD
 				queueMsgLCD.anyPtr = NULL;
 				retCode = osMessageQueuePut(
 					queue_lcd_id,
@@ -86,18 +68,21 @@ void MacSender(void *argument)
 					osWaitForever);
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
 
-				if(osMessageQueueGetCount(msgBuffer) != 0){	//Si on a des messages à envoyer
-					saveToken = &queueMsg;				//Save le token
-					retCode = osMessageQueueGet(	//Prend le message à envoyer
+				if(osMessageQueueGetCount(msgBuffer) != 0){	//If we have msg to send
+					saveToken = qPtr;				//Save the token
+					retCode = osMessageQueueGet(	//Take the msg from waiting queue
 						msgBuffer,
 						&queueMsg,
 						NULL,
 						osWaitForever);
 					CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
 					
-					saveMsg = &queueMsg;	//Save the address of the message we send for DATABACK
+					saveMsg = queueMsg.anyPtr;	//Save the address of the data for DATABACK
 					
-					retCode = osMessageQueuePut(	//Envoie le message au PHY_SENDER
+					queueMsg.anyPtr = osMemoryPoolAlloc(memPool, osWaitForever); //send a copy and keep the original
+					memcpy(queueMsg.anyPtr, saveMsg, saveMsg[2]+4);
+					
+					retCode = osMessageQueuePut(	//Send the msg to PHY_SENDER
 						queue_phyS_id,
 						&queueMsg,
 						osPriorityNormal,
@@ -114,26 +99,29 @@ void MacSender(void *argument)
 				}
 				
 				break;
-			case DATABACK : //Quand on a envoyé un message, on va le recevoir en retour
-				uint8_t ack = qPtr[3+qPtr[3]]&0x01;
-				uint8_t read = qPtr[3+qPtr[3]]&0x02;
-				if(read != 0){		//Tester si le Read bit est à 1
-					if(ack != 0){		//Tester si le Ack bit est à 1
-						//Send token
-						retCode = osMessageQueuePut(	
-							queue_phyS_id,
-							saveToken,
-							osPriorityNormal,
-							osWaitForever);
-						CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
-
+			case DATABACK : //The message we sent is coming back
+				uint8_t ack = qPtr[3+qPtr[2]]&0x01;
+				uint8_t read = qPtr[3+qPtr[2]]&0x02;
+				if(read != 0){		//Test if Read bit is 1
+					if(ack != 0){		//Test if Ack bit is 1
 						//Free memory msg databack
-						retCode = osMemoryPoolFree(memPool, &queueMsg);				//FREE DATABACK
+						retCode = osMemoryPoolFree(memPool, queueMsg.anyPtr);				//FREE DATABACK
 						CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
 						
 						//Free memory msg sent
 						retCode = osMemoryPoolFree(memPool, saveMsg);				//FREE DATABACK
-						CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);					
+						CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
+						
+						//Send token
+						queueMsg.type = TO_PHY;
+						queueMsg.anyPtr = saveToken;
+						
+						retCode = osMessageQueuePut(	
+							queue_phyS_id,
+							&queueMsg,
+							osPriorityNormal,
+							osWaitForever);
+						CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);											
 					}
 					else{
 						qPtr[3+qPtr[2]] = (qPtr[3+qPtr[2]]&0xFC); //Read=0, Ack=0
@@ -152,8 +140,7 @@ void MacSender(void *argument)
 					CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);	
 				}
 				break;
-			case NEW_TOKEN :
-				//TODO first
+			case NEW_TOKEN : //creat a new token
 				msg = osMemoryPoolAlloc(memPool,osWaitForever);		//MALLOC for the new token
 				msg[0] = 0xFF;
 				for(int i = 0; i < 16; i++){
@@ -186,21 +173,27 @@ void MacSender(void *argument)
 				msg[2] = strlen(qPtr);		//Message's length		//Length
 				memcpy(&(msg[3]), qPtr, msg[2]);								//User Data
 			
-				uint32_t check = qPtr[0]+qPtr[1]+qPtr[2];
-				for(int i=0;i<qPtr[2];i++) {
-					check += qPtr[3+i];
+				uint32_t check = msg[0]+msg[1]+msg[2];
+				for(int i=0;i<msg[2];i++) {
+					check += msg[3+i];
 				}		
-				msg[3+qPtr[2]] = (check << 2);									//Status [Checksum, Read, Ack]
+				msg[3+msg[2]] = (check << 2);									//Status [Checksum, Read, Ack]
+				
+				
+				
+				retCode = osMemoryPoolFree(memPool, queueMsg.anyPtr);				//FREE DATA_IND
+				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
+				
+				queueMsg.type = TO_PHY;
+				queueMsg.anyPtr = msg;
 				
 				retCode = osMessageQueuePut(
 					msgBuffer,
-					msg,	
+					&queueMsg,	
 					osPriorityNormal,
 					osWaitForever);
 				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
 				
-				retCode = osMemoryPoolFree(memPool, &queueMsg);				//FREE DATA_IND
-				CheckRetCode(retCode,__LINE__,__FILE__,CONTINUE);
 				break;
 			default :
 				break;
