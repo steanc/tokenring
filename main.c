@@ -400,7 +400,7 @@ int main(void)
 	//------------------------------------------------------------------------------
 	// create threads
 	//------------------------------------------------------------------------------
-//	audio_id = osThreadNew(AudioPlayer, NULL,  &audio_attr);    // Create thread
+	audio_id = osThreadNew(AudioPlayer, NULL,  &audio_attr);    // Create thread
   debug_id = osThreadNew(DebugStation, NULL,  &debug_attr);    // Create thread
   phy_rec_id = osThreadNew(PhReceiver, NULL,  &phy_rec_attr);    // Create thread
   phy_snd_id = osThreadNew(PhSender, NULL,  &phy_snd_attr);    // Create thread

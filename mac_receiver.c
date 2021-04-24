@@ -138,7 +138,7 @@ void MacReceiver(void *argument)
 				qMsgOut.anyPtr = qPtrIn;
 				qMsgOut.type = TO_PHY;
 				retCode = osMessageQueuePut(
-					queue_macS_id,
+					queue_phyS_id,
 					&qMsgOut,
 					osPriorityNormal,
 					osWaitForever);
